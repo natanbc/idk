@@ -23,15 +23,6 @@ object IDK extends App {
 
     StdLib.install(vars)
 
-    class Thing {
-        var myInt: Int = 1
-        def myMethod(): Unit = println("myMethod() called")
-
-        def myMethod(i: Int): Unit = println(s"myMethod(Int) called, i = $i")
-    }
-
-    vars(StringValue("test")) = Value.of(new Thing())
-
     println("Type -help for a list of commands")
     while(running) {
         val line = StdIn.readLine("input> ")
