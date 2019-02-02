@@ -1,0 +1,14 @@
+group 'com.github.natanbc'
+version '1.0-SNAPSHOT'
+
+apply plugin: 'scala'
+
+sourceCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'org.scala-lang:scala-library:' + project.scalaVersion
+}

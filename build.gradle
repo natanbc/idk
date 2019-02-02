@@ -1,0 +1,37 @@
+plugins {
+    id'java'
+    id'scala'
+    id'application'
+    id'com.github.johnrengelman.shadow' version '1.2.4'
+}
+
+group 'com.github.natanbc'
+version '1.0-SNAPSHOT'
+
+mainClassName = "com.github.natanbc.idk.IDK"
+
+sourceCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+    jcenter()
+}
+
+ext {
+    scalaMajor = '2'
+    scalaMinor = '12'
+    scalaPatch = '4'
+    scalaVersion = scalaMajor + '.' + scalaMinor + '.' + scalaPatch
+}
+
+dependencies {
+    compile project(':idk-parser')
+    compile project(':idk-runtime')
+
+    compile 'org.scala-lang:scala-library:' + scalaVersion
+    //compile 'org.ow2.asm:asm:5.2'
+}
+
+run {
+    standardInput = System.in
+}
