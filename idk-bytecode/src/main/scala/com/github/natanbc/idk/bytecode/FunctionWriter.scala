@@ -11,40 +11,54 @@ class FunctionWriter private(bw: BytecodeWriter, id: Int, name: String, args: Li
     declaredLocals.appendAll(args)
     private val labels = new collection.mutable.ListBuffer[Label]()
 
+    def declareAnonymousLocal(): Int = {
+        declaredLocals += null
+        declaredLocals.size - 1
+    }
+
     def declareLocal(name: String): Unit = {
         declaredLocals += name
+    }
+
+    def loadLocal(idx: Int): Unit = {
+        writeByte(Opcodes.LOAD_LOCAL)
+        writeShort(idx)
     }
 
     def loadVariable(name: String): Unit = {
         val idx = declaredLocals.indexOf(name)
         if(idx != -1) {
-            writeByte(Opcodes.LOAD_LOCAL)
-            writeShort(idx)
-            return
-        } else if(parent != null) {
-            var p = parent
-            var depth = 1
-            while(p != null) {
-                val idx = p.declaredLocals.indexOf(name)
-                if(idx != -1) {
-                    writeByte(Opcodes.LOAD_UPVALUE)
-                    writeShort(depth)
-                    writeShort(idx)
-                    return
+            loadLocal(idx)
+        } else {
+            if(parent != null) {
+                var p = parent
+                var depth = 1
+                while(p != null) {
+                    val idx = p.declaredLocals.indexOf(name)
+                    if(idx != -1) {
+                        writeByte(Opcodes.LOAD_UPVALUE)
+                        writeShort(depth)
+                        writeShort(idx)
+                        return
+                    }
+                    p = p.parent
+                    depth += 1
                 }
-                p = p.parent
-                depth += 1
             }
+            writeByte(Opcodes.LOAD_GLOBAL)
+            writeUTF(name)
         }
-        writeByte(Opcodes.LOAD_GLOBAL)
-        writeUTF(name)
+    }
+
+    def storeLocal(idx: Int): Unit = {
+        writeByte(Opcodes.STORE_LOCAL)
+        writeShort(idx)
     }
 
     def storeVariable(name: String): Unit = {
         val idx = declaredLocals.indexOf(name)
         if(idx != -1) {
-            writeByte(Opcodes.STORE_LOCAL)
-            writeShort(idx)
+            storeLocal(idx)
         } else {
             if(parent != null) {
                 var p = parent
@@ -61,8 +75,7 @@ class FunctionWriter private(bw: BytecodeWriter, id: Int, name: String, args: Li
                     depth += 1
                 }
             }
-            writeByte(Opcodes.STORE_GLOBAL)
-            writeUTF(name)
+            storeGlobal(name)
         }
     }
 

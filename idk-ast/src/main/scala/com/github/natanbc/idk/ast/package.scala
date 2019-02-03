@@ -63,8 +63,8 @@ package object ast {
         override def isConstant: Boolean = condition.isConstant && ifBody.isConstant && elseBody.isConstant
     }
 
-    case class While(condition: Node, body: Node) extends Node {
-        override def isConstant: Boolean = condition.isConstant && body.isConstant
+    case class While(condition: Node, body: Node, elseBody: Node) extends Node {
+        override def isConstant: Boolean = condition.isConstant && body.isConstant && elseBody.isConstant
     }
 
     case class Return(value: Node) extends Node
@@ -84,7 +84,7 @@ package object ast {
         override def isConstant: Boolean = key.isConstant && where.isConstant
     }
 
-    case class ObjectLiteral(fields: List[(String, Node)]) extends Node {
+    case class ObjectLiteral(fields: List[(Node, Node)]) extends Node {
         override def isConstant: Boolean = fields.forall(_._2.isConstant)
     }
 
@@ -146,8 +146,11 @@ package object ast {
                 simplify(Sub(simplify(n1), simplify(n2)), nested = true)
 
             case Mul(StringConstant(a), IntConstant(b)) =>
-                if(b < 0 || b > Integer.MAX_VALUE) throw new IllegalArgumentException(s"Out of bounds string multiplier: $b")
-                StringConstant(a * b.toInt)
+                if(b < 0 || b > Integer.MAX_VALUE) {
+                    node
+                } else {
+                    StringConstant(a * b.toInt)
+                }
             case Mul(IntConstant(0), _) => IntConstant(0)
             case Mul(FloatConstant(0D), _) => FloatConstant(0D)
             case Mul(_, IntConstant(0)) => IntConstant(0)
@@ -166,8 +169,6 @@ package object ast {
 
             case Div(IntConstant(0), _) => IntConstant(0)
             case Div(FloatConstant(0D), _) => FloatConstant(0D)
-            case Div(_, IntConstant(0)) => throw new IllegalArgumentException("division by 0")
-            case Div(_, FloatConstant(0D)) => throw new IllegalArgumentException("division by 0")
             case Div(n, IntConstant(1)) => simplify(n)
             case Div(n, FloatConstant(1D)) => simplify(n)
             case Div(IntConstant(a), IntConstant(b)) => IntConstant(a / b)
@@ -282,18 +283,18 @@ package object ast {
                 if(nested) return node
                 simplify(If(simplify(a), simplify(b), simplify(c)), nested = true)
 
-            case While(BooleanConstant(false), _) => Body(List())
-            case While(a, b) =>
+            case While(BooleanConstant(false), _, e) => simplify(e)
+            case While(a, b, e) =>
                 if(nested) return node
-                simplify(While(simplify(a), simplify(b)), nested = true)
+                simplify(While(simplify(a), simplify(b), simplify(e)), nested = true)
 
             case Body(b) if b.lengthCompare(1) == 0 => simplify(b.head)
             case Body(b) =>
                 if(nested) return node
-                simplify(Body(b.map(simplify(_)).zipWithIndex.filter({
-                    case (n, i) if n.isConstant && (n ne b.last) => false
+                simplify(Body(b.map(simplify(_)).filter({
+                    case n if n.isConstant && (n ne b.last) => false
                     case _ => true
-                }).map(_._1)), nested = true)
+                })), nested = true)
 
             case Function(name,args,body,varargs,annotations) =>
                 if(nested) return node
@@ -312,33 +313,42 @@ package object ast {
                     }
                 } else {
                     if(nested) return node
-                    simplify(Member(IntConstant(n), ArrayLiteral(values.map(simplify(_)))), nested = true)
+                    val simplified = values.map(simplify(_))
+                    if(simplified.size > n && n >= 0) {
+                        simplify(Member(IntConstant(n), ArrayLiteral(simplified)), nested = true)
+                    } else {
+                        simplify(Body(simplified :+ NilConstant))
+                    }
                 }
             case Member(key, ArrayLiteral(values)) if key.isConstant && values.forall(_.isConstant) =>
                 NilConstant
             case Member(StringConstant(s), ObjectLiteral(fields)) =>
                 if(fields.forall(_._2.isConstant)) {
-                    fields.find(_._1 == s) match {
+                    fields.find(_._1 == Identifier(s)) match {
                         case Some(p) => simplify(p._2)
                         case None => NilConstant
                     }
                 } else {
                     if(nested) return node
                     val simplified = fields.map(p=>(p._1, simplify(p._2)))
-//                    val builder = List.newBuilder[Node]
-//                    simplified.foreach {
-//                        case (`s`, n) => builder += n
-//                        case
-//                    }
-                    if(simplified.exists(_._1 == s)) {
+                    if(simplified.exists(_._1 == Identifier(s))) {
                         simplify(Member(StringConstant(s), ObjectLiteral(simplified.filter {
-                            case (`s`, _) => true
+                            case (Identifier(`s`), _) => true
                             case (_, v) if v.isConstant => false
                             case _ => true
                         })), nested = true)
                     } else {
                         simplify(Body(simplified.map(_._2).filter(n => !n.isConstant) :+ NilConstant))
                     }
+                }
+
+            case Member(IntConstant(n), StringConstant(s)) =>
+                if(n >= s.length) {
+                    NilConstant
+                } else if(n >= 0) {
+                    StringConstant(s.charAt(n.toInt).toString)
+                } else {
+                    node
                 }
 
             case Member(a, b) =>

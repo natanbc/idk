@@ -1,6 +1,6 @@
 package com.github.natanbc.idk
 
-import java.io.File
+import java.io.{File, PrintWriter, StringWriter}
 
 import com.github.natanbc.idk.parser.Parser
 import com.github.natanbc.idk.parser.parselets._
@@ -93,8 +93,8 @@ object IDK extends App {
 
     private def execute(code: String): Unit = {
         try {
-            val rawInterpreter = new Interpreter(new Compiler(code, simplify = false).compile(), vars)
-            val simplifiedInterpreter = new Interpreter(new Compiler(code).compile(), vars)
+            lazy val rawInterpreter = new Interpreter(new Compiler(code, simplify = false).compile(), vars)
+            lazy val simplifiedInterpreter = new Interpreter(new Compiler(code).compile(), vars)
 
 
             val parser = new Parser(code)
@@ -111,7 +111,9 @@ object IDK extends App {
                 println("Raw AST:       " + raw.mkString(","))
                 println("Optimized AST: " + simple.mkString(","))
                 println("Bytecode:")
-                Compiler.printCode(new Compiler(code).compile())
+                val sw = new StringWriter()
+                Compiler.printCode(new Compiler(code).compile(), new PrintWriter(sw))
+                println(sw)
                 println("Result:        " + simplifiedInterpreter.run())
             } else {
                 println("Result: " + simplifiedInterpreter.run())

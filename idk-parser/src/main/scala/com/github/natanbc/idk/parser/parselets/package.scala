@@ -42,17 +42,25 @@ package object parselets {
             n
         }),
         (TokenType.left_brace, (parser,_)=>{
-            val l = new collection.mutable.ListBuffer[(String, Node)]()
+            val l = new collection.mutable.ListBuffer[(Node, Node)]()
             if(!parser.matches(TokenType.right_brace)) {
                 do {
-                    val name = parser.consume(TokenType.identifier).value
-                    val next = parser.peek().tpe
-                    if(next == TokenType.comma || next == TokenType.right_brace) {
-                        l += name->Identifier(name)
-                    } else {
+                    if(parser.matches(TokenType.left_bracket)) {
+                        val expr = parser.parseExpression()
+                        parser.consume(TokenType.right_bracket)
                         parser.consume(TokenType.assign)
                         val value = parser.parseExpression()
-                        l += name->value
+                        l += expr->value
+                    } else {
+                        val k = parser.consume(TokenType.identifier).value
+                        val next = parser.peek().tpe
+                        if(next == TokenType.comma || next == TokenType.right_brace) {
+                            l += StringConstant(k)->Identifier(k)
+                        } else {
+                            parser.consume(TokenType.assign)
+                            val value = parser.parseExpression()
+                            l += StringConstant(k)->value
+                        }
                     }
                 } while(parser.matches(TokenType.comma))
                 parser.consume(TokenType.right_brace)
@@ -130,6 +138,7 @@ package object parselets {
                 case m: Member => Assign(m, value)
                 case g: Global => Assign(g, value)
                 case l: Let => Assign(l, value)
+                case Assign(a, b) => Assign(a, Assign(b, value))
                 case _ => throw new SyntaxException("left hand side of an assignment must be an identifier or member")
             }
         }
@@ -188,7 +197,20 @@ package object parselets {
                     Body(b.toList)
                 }
             }
-            While(cond, body)
+            val elseBody = {
+                val hasBlock = parser.matches(TokenType.t_else)
+                val leftBrace = parser.matches(TokenType.left_brace)
+                if(!hasBlock || (leftBrace && parser.matches(TokenType.right_brace))) {
+                    Body(List())
+                } else {
+                    val b = new collection.mutable.ListBuffer[Node]()
+                    do {
+                        b += parser.parseExpression()
+                    } while(leftBrace && !parser.matches(TokenType.right_brace))
+                    Body(b.toList)
+                }
+            }
+            While(cond, body, elseBody)
         }
     }
 

@@ -100,7 +100,7 @@ class Interpreter(_bytecode: Array[Byte], val globals: mutable.Map[Value, Value]
 
                 case Opcodes.ARRAY_LITERAL =>
                     val b = new Array[Value](op.args.head)
-                    for(i <- op.args.head to 1) {
+                    for(i <- op.args.head to 1 by -1) {
                         b(i - 1) = stack.pop()
                     }
                     stack.push(ArrayValue(b.to[ArrayBuffer]))
@@ -131,12 +131,12 @@ class Interpreter(_bytecode: Array[Byte], val globals: mutable.Map[Value, Value]
                 case Opcodes.LOAD_GLOBAL =>
                     stack.push(globals.getOrElse(StringValue(br.getStringConstant(op.args.head)), NilValue.instance))
                 case Opcodes.STORE_GLOBAL =>
-                    globals.put(StringValue(br.getStringConstant(op.args.head)), stack.peek())
+                    globals.put(StringValue(br.getStringConstant(op.args.head)), stack.pop())
 
                 case Opcodes.LOAD_LOCAL =>
                     stack.push(locals(op.args.head))
                 case Opcodes.STORE_LOCAL =>
-                    locals(op.args.head) = stack.peek()
+                    locals(op.args.head) = stack.pop()
 
                 case Opcodes.LOAD_FIELD =>
                     val k = stack.pop()
@@ -161,7 +161,7 @@ class Interpreter(_bytecode: Array[Byte], val globals: mutable.Map[Value, Value]
                     for(_ <- 1 to parentIdx) {
                         p = p.parent
                     }
-                    p.locals(localIdx) = stack.peek()
+                    p.locals(localIdx) = stack.pop()
 
                 case Opcodes.POP => stack.pop()
 
@@ -235,8 +235,6 @@ class Interpreter(_bytecode: Array[Byte], val globals: mutable.Map[Value, Value]
                 case Opcodes.LOAD_FUNCTION =>
                     val function = functions(op.args.head)
                     val fn = new Function {
-                        override def javaValue: Any = ()=>new FunctionInterpreter(function, FunctionInterpreter.this)
-
                         override def apply(args: Seq[Value]): Value = {
                             val interpreter = new FunctionInterpreter(function, FunctionInterpreter.this)
                             args.take(function.argCount - (if(function.varargs) 1 else 0)).zipWithIndex.foreach(p=>{

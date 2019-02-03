@@ -1,6 +1,6 @@
 package com.github.natanbc.idk.compiler
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, PrintWriter}
 
 import com.github.natanbc.idk.ast._
 import com.github.natanbc.idk.bytecode.{BytecodeWriter, FunctionWriter, Opcodes}
@@ -146,29 +146,43 @@ class Compiler(parser: Parser, simplify: Boolean) {
                 args.foreach(compile(_, fw))
                 fw.call(args.length)
 
+            case Body(List()) =>
+                if(resultUsed) fw.loadNil()
+                return
             case Body(nodes) =>
                 nodes.zipWithIndex.foreach {
                     case (n, i) => compile(n, fw,
                         resultUsed && nodes.lengthCompare(i + 1) == 0)
                 }
+                return
 
             case Identifier(name) =>
                 fw.loadVariable(name)
             case Assign(Identifier(name), value) =>
                 compile(value, fw)
+                if(resultUsed) fw.dup()
                 fw.storeVariable(name)
+                return
             case Assign(Member(key, where), value) =>
                 compile(where, fw)
                 compile(key, fw)
                 compile(value, fw)
+                if(resultUsed) fw.dup()
                 fw.storeMember()
+                return
             case Assign(Let(name), value) =>
                 fw.declareLocal(name)
                 compile(value, fw)
+                if(resultUsed) fw.dup()
                 fw.storeVariable(name)
+                return
             case Assign(Global(name), value) =>
                 compile(value, fw)
+                if(resultUsed) fw.dup()
                 fw.storeGlobal(name)
+                return
+            case Assign(a, b) =>
+                throw new SyntaxException(s"Cannot assign $b to $a")
             case Let(name) =>
                 fw.declareLocal(name)
 
@@ -188,17 +202,29 @@ class Compiler(parser: Parser, simplify: Boolean) {
                 fw.writeLabel(l1)
                 compile(elseBody, fw, resultUsed)
                 fw.writeLabel(l2)
+                return
 
-            case While(condition, body) =>
+            case While(condition, body, elseBody) =>
                 val l1 = fw.newLabel()
                 val l2 = fw.newLabel()
+                val l3 = fw.newLabel()
+
+                val runElse = fw.declareAnonymousLocal()
+                fw.loadConstant(true)
+                fw.storeLocal(runElse)
 
                 fw.writeLabel(l1)
                 compile(condition, fw)
                 fw.ifFalse(l2)
+                fw.loadConstant(false)
+                fw.storeLocal(runElse)
                 compile(body, fw, resultUsed = false)
                 fw.jumpTo(l1)
                 fw.writeLabel(l2)
+                fw.loadLocal(runElse)
+                fw.ifFalse(l3)
+                compile(elseBody, fw, resultUsed = false)
+                fw.writeLabel(l3)
                 fw.loadNil()
 
             case Return(value) =>
@@ -207,7 +233,7 @@ class Compiler(parser: Parser, simplify: Boolean) {
 
             case ObjectLiteral(elements) =>
                 for((k,v) <- elements) {
-                    fw.loadConstant(k)
+                    compile(k, fw)
                     compile(v, fw)
                 }
                 fw.objectLiteral(elements.length)
@@ -235,79 +261,84 @@ class Compiler(parser: Parser, simplify: Boolean) {
                     fw.decoratorCall(name)
                 }
                 if(name != null) {
+                    if(resultUsed) fw.dup()
                     fw.storeGlobal(name)
                 }
         }
-        if(!resultUsed) fw.pop()
+        if(!resultUsed) {
+            fw.pop()
+        }
     }
 }
 
 object Compiler {
-    def printCode(code: Array[Byte]): Unit = {
+    def printCode(code: Array[Byte], p: PrintWriter): Unit = {
         val in = new DataInputStream(new ByteArrayInputStream(code))
 
         val cp = new collection.mutable.ListBuffer[Any]()
         val cpLength = in.readUnsignedShort()
-        println(s"Constant pool (size = $cpLength):")
+        p.println(s"Constant pool (size = $cpLength):")
         for(i <- 1 to cpLength) {
-            print(s"  ${i - 1}: ")
+            p.print(s"  ${i - 1}: ")
             in.readUnsignedByte() match {
                 case Opcodes.Meta.CONSTANT_STRING =>
                     val v = in.readUTF()
                     cp += v
-                    println(s"String $v")
+                    p.println(s"String $v")
                 case Opcodes.Meta.CONSTANT_LONG =>
                     val v = in.readLong()
                     cp += v
-                    println(s"Integer $v")
+                    p.println(s"Integer $v")
                 case Opcodes.Meta.CONSTANT_DOUBLE =>
                     val v = in.readDouble()
                     cp += v
-                    println(s"Float $v")
+                    p.println(s"Float $v")
             }
         }
         in.readInt()
         while(in.available() > 0) {
             in.readUnsignedByte() match {
                 case Opcodes.Meta.FUNCTION =>
-                    print(s"Function (id = ${in.readUnsignedShort()})")
-                    if(in.readBoolean()) print(s" ${cp(in.readUnsignedShort())}")
+                    p.print(s"Function (id = ${in.readUnsignedShort()})")
+                    if(in.readBoolean()) p.print(s" ${cp(in.readUnsignedShort())}")
                     val varargs = in.readBoolean()
                     val annotationCount = in.readUnsignedShort()
                     if(annotationCount > 0) {
-                        print("[")
+                        p.print("[")
                         for(i <- 1 to annotationCount) {
-                            print(s"${cp(in.readUnsignedShort())}")
-                            if(i < annotationCount) print(", ")
+                            p.print(s"${cp(in.readUnsignedShort())}")
+                            if(i < annotationCount) p.print(", ")
                         }
-                        print("]")
+                        p.print("]")
                     }
                     val args = in.readUnsignedShort()
-                    print("(")
+                    p.print("(")
                     for(i <- 1 to args) {
-                        print(s"${cp(in.readUnsignedShort())}")
-                        if(i < args) print(", ")
+                        if(i == args && varargs) p.print("...")
+                        p.print(s"${cp(in.readUnsignedShort())}")
+                        if(i < args) p.print(", ")
                     }
-                    println(")")
+                    p.println(")")
                     in.readUnsignedShort()
                     val codeSize = in.readUnsignedShort()
                     val bytes = new Array[Byte](codeSize)
                     in.readFully(bytes)
-                    printInstructions(cp, bytes)
+                    printInstructions(cp, bytes, p)
             }
         }
+        p.flush()
     }
 
-    private def printInstructions(cp: collection.mutable.ListBuffer[Any], i: Array[Byte]): Unit = {
+    private def printInstructions(cp: collection.mutable.ListBuffer[Any], i: Array[Byte], p: PrintWriter): Unit = {
         val in = new DataInputStream(new ByteArrayInputStream(i))
         var idx = 0
         while(in.available() > 0) {
             val opcode = Opcodes.fromID(in.readUnsignedByte())
-            print(s"    $idx: " + Opcodes.nameOf(opcode.id))
+            p.print(s"    $idx: " + Opcodes.nameOf(opcode.id))
             for(_ <- 1 to opcode.narg) {
-                print(" " + in.readUnsignedShort())
+                p.print(" " + in.readUnsignedShort())
             }
-            println()
+            p.println()
             idx += 1
         }
     }
